@@ -6,7 +6,7 @@ import { resolveModel } from './alias'
 export default {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
         try {
-            return await handle(request)
+            return await handle(request, env)
         } catch (error) {
             console.error(error)
             return new Response('Internal server error', { status: 500 })
@@ -14,7 +14,7 @@ export default {
     }
 } satisfies ExportedHandler<Env>
 
-async function handle(request: Request): Promise<Response> {
+async function handle(request: Request, env: Env): Promise<Response> {
     if (request.method !== 'POST') {
         return new Response('Method not allowed', { status: 405 })
     }
@@ -27,12 +27,22 @@ async function handle(request: Request): Promise<Response> {
         return pathErr
     }
 
-    const { apiKey, mutatedHeaders, err: apiKeyErr } = getApiKey(request.headers)
+    const { apiKey: dummyKey, mutatedHeaders, err: apiKeyErr } = getApiKey(request.headers)
     if (apiKeyErr) {
         return apiKeyErr
     }
 
-    if (!apiKey || !typeParam || !baseUrl) {
+    // Require dummy client key
+    if (!dummyKey) {
+        return new Response('Missing dummy api key', { status: 401 })
+    }
+
+    const upstreamApiKey = env.NVIDIA_API_KEY;
+    if (!upstreamApiKey) {
+        return new Response('Internal server error, missing provider api key configuration', { status: 500 })
+    }
+
+    if (!typeParam || !baseUrl) {
         return new Response('Internal server error, missing params', { status: 500 })
     }
 
@@ -74,7 +84,7 @@ async function handle(request: Request): Promise<Response> {
     const providerRequest = await provider.convertToProviderRequest(
         modifiedRequest,
         baseUrl,
-        apiKey
+        upstreamApiKey
     )
     const providerResponse = await fetch(providerRequest)
     return await provider.convertToClaudeResponse(providerResponse)
