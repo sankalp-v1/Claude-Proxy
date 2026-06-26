@@ -3,6 +3,9 @@ import * as gemini from './gemini'
 import * as openai from './openai'
 import { resolveModel } from './alias'
 
+// Hardcoded upstream provider — clients never need to know this.
+const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1'
+
 export default {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
         try {
@@ -92,9 +95,26 @@ async function handle(request: Request, env: Env): Promise<Response> {
 
 function parsePath(url: URL): { typeParam?: string; baseUrl?: string; err?: Response } {
     const pathParts = url.pathname.split('/').filter(part => part !== '')
+
+    // --- New simplified path: POST /v1/messages or POST / ---
+    // Clients using ANTHROPIC_BASE_URL=https://<worker>.workers.dev
+    // will hit either /v1/messages directly (Claude Code default).
+    if (
+        pathParts.length === 0 ||
+        (pathParts.length === 2 && pathParts[0] === 'v1' && pathParts[1] === 'messages') ||
+        (pathParts.length === 1 && pathParts[0] === 'messages')
+    ) {
+        return { typeParam: 'openai', baseUrl: NVIDIA_BASE_URL }
+    }
+
+    // --- Legacy path (backwards compat): /{type}/{provider_url}/v1/messages ---
+    // Still accepted so existing clients continue to work during migration.
     if (pathParts.length < 3) {
         return {
-            err: new Response('Invalid path format. Expected: /{type}/{provider_url}/v1/messages', { status: 400 })
+            err: new Response(
+                'Invalid path. Use POST /v1/messages, or legacy: /{type}/{provider_url}/v1/messages',
+                { status: 400 }
+            )
         }
     }
     const lastTwoParts = pathParts.slice(-2)
