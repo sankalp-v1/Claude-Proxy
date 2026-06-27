@@ -1,5 +1,7 @@
 import { routeRequest } from './router'
 import { REGISTRY, ModelID } from './registry'
+import { healthManager } from './health'
+import { metrics } from './metrics'
 
 export default {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -29,13 +31,19 @@ async function handle(request: Request, env: Env, requestId: string): Promise<Re
         if (path === '/v1/models') {
             return handleModels(requestId)
         }
+        if (path === '/metrics') {
+            return new Response(metrics.toText(), {
+                status: 200,
+                headers: { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' },
+            })
+        }
         if (path === '/health' || path === '/v1/health') {
-            return json({ status: 'ok', request_id: requestId }, 200, requestId)
+            return handleHealth(requestId)
         }
         return anthropicError('invalid_request_error', `Unknown path: ${path}`, 404, requestId)
     }
 
-    // ── POST only beyond this point ────────────────────────────────────────
+    // ── POST only beyond this point ──────────────────────────────────────────
 
     if (method !== 'POST') {
         return anthropicError(
@@ -75,7 +83,7 @@ async function handle(request: Request, env: Env, requestId: string): Promise<Re
     return addRequestId(response, requestId)
 }
 
-// ── GET /v1/models ─────────────────────────────────────────────────────────────
+// ── GET /v1/models ──────────────────────────────────────────────────────────
 
 function handleModels(requestId: string): Response {
     const data = Object.entries(REGISTRY).map(([id, entry]) => ({
@@ -83,13 +91,35 @@ function handleModels(requestId: string): Response {
         object:       'model',
         display_name: entry.displayName,
         capabilities: entry.capabilities,
-        provider:     entry.provider,       // provider ID only, never URL or key
+        provider:     entry.provider,
         aliases:      entry.aliases,
     }))
     return json({ object: 'list', data, request_id: requestId }, 200, requestId)
 }
 
-// ── Path validation ─────────────────────────────────────────────────────────────
+// ── GET /health ─────────────────────────────────────────────────────────────────
+
+function handleHealth(requestId: string): Response {
+    const modelIds = healthManager.modelIds()
+    const circuits: Record<string, unknown> = {}
+    for (const id of modelIds) {
+        circuits[id] = healthManager.snapshot(id)
+    }
+
+    const metricsSnapshot = metrics.toJson()
+
+    // Overall status: degraded if any model circuit is open
+    const anyOpen = modelIds.some(id => healthManager.snapshot(id).state === 'OPEN')
+
+    return json({
+        status:     anyOpen ? 'degraded' : 'ok',
+        request_id: requestId,
+        circuits,
+        metrics:    metricsSnapshot,
+    }, 200, requestId)
+}
+
+// ── Path validation ──────────────────────────────────────────────────────────────
 
 /**
  * Accept:
@@ -127,7 +157,7 @@ function validatePath(url: URL): Response | null {
     )
 }
 
-// ── Client key extraction ───────────────────────────────────────────────────────
+// ── Client key extraction ───────────────────────────────────────────────────────────
 
 function extractClientKey(
     headers: Headers

@@ -1,52 +1,139 @@
-Convert model APIs from various providers (Gemini, OpenAI) into Claude format and serve them
+# Claude-Proxy — Cloudflare Worker AI Gateway
 
-## Features
+A production-grade Cloudflare Worker that proxies Claude Code (and any Anthropic-compatible client) to NVIDIA NIM endpoints.
 
-- 🚀 One-click deploy to Cloudflare Workers
-- 🔄 Compatible with Claude Code. Pair with [One-Balance](https://github.com/glidea/one-balance) to use Claude Code at low cost or even free
-- 📡 Supports both streaming and non-streaming responses
-- 🛠️ Supports tool calling
-- 🎯 Zero configuration, works out of the box
+Clients talk Anthropic API. The Worker handles everything else:
+- Model alias resolution
+- Authentication (NVIDIA API key stays in Cloudflare Secrets)
+- Circuit breaking per model
+- Automatic fallback chains
+- Structured JSON logging
+- In-memory Prometheus metrics
 
-## Quick Deploy
+---
+
+## Quick Start
 
 ```bash
-git clone https://github.com/glidea/claude-worker-proxy
-cd claude-worker-proxy
+# Install deps
 npm install
-wrangler login # If not installed yet: npm i -g wrangler@latest
-npm run deploycf
+
+# Set your NVIDIA API key as a Cloudflare secret
+npx wrangler secret put NVIDIA_API_KEY
+
+# Dev server
+npx wrangler dev
+
+# Deploy
+npx wrangler deploy
 ```
 
-## Usage
+Then point Claude Code at your Worker:
 
 ```bash
-# Example: Request Gemini backend in Claude format
-curl -X POST https://claude-worker-proxy.xxxx.workers.dev/gemini/https://generativelanguage.googleapis.com/v1beta/v1/messages \
-  -H "x-api-key: YOUR_GEMINI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gemini-2.5-flash",
-    "messages": [
-      {"role": "user", "content": "Hello"}
-    ]
-  }'
+export ANTHROPIC_BASE_URL=https://<your-worker>.workers.dev
+export ANTHROPIC_API_KEY=dummy
 ```
 
-### Parameter Reference
+No provider URLs. No NVIDIA credentials on the client.
 
-- URL format: `{worker_url}/{type}/{provider_url_with_version}/v1/messages`
-- `type`: Target provider type — currently supports `gemini` and `openai`
-- `provider_url_with_version`: Target provider's API base URL
-- `x-api-key`: API key for the target provider
+---
 
-### Using with Claude Code
+## Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/messages` | Anthropic Messages API (canonical) |
+| `POST` | `/messages` | Alias |
+| `POST` | `/` | Alias |
+| `POST` | `/openai/<provider_url>/v1/messages` | Legacy backwards-compat |
+| `GET`  | `/v1/models` | List available models and aliases |
+| `GET`  | `/health` | Gateway health + circuit breaker state |
+| `GET`  | `/v1/health` | Same as `/health` |
+| `GET`  | `/metrics` | Prometheus text exposition |
+
+---
+
+## Environment Variables
+
+| Name | Where | Description |
+|------|-------|-------------|
+| `NVIDIA_API_KEY` | Cloudflare Secret | NVIDIA NIM API key. Set via `wrangler secret put`. |
+
+No other env vars are needed.
+
+---
+
+## Model Aliases
+
+The Worker maps Anthropic model strings to NVIDIA NIM model IDs automatically.
+All standard `claude-3-5-sonnet-*`, `claude-3-7-sonnet-*`, `claude-opus-4-*`, and
+`claude-sonnet-4-*` aliases are supported.
+
+See `src/registry.ts` for the full list.
+
+---
+
+## Running Tests
 
 ```bash
-# Edit ~/.claude/settings.json
+npm install
+npx vitest run
+```
+
+Test files live in `tests/`.
+
+---
+
+## Health Check
+
+```bash
+curl https://<your-worker>.workers.dev/health | jq
+```
+
+```json
 {
-  "env": {
-    "ANTHROPIC_BASE_URL": "https://claude-worker-proxy.xxxx.workers.dev/gemini/https://xxx.com/v1beta", # https://xxx.com/v1beta: note the version suffix; must support function calling!
-    "ANTHROPIC_CUSTOM_HEADERS": "x-api-key: YOUR_KEY",
-    "ANTHROPIC_MODEL": "gemini-2.5-pro", # Large model, modify as needed
-    "ANTHROPIC_SMALL_FAST_MODEL": "gemini-2.5-flash", # Small 
+  "status": "ok",
+  "circuits": {
+    "nvidia-llama-3.1-70b": {
+      "state": "CLOSED",
+      "failures": 0,
+      "successRate": 1,
+      "p50LatencyMs": 412
+    }
+  },
+  "metrics": {
+    "uptimeSeconds": "3821.4",
+    "models": {
+      "nvidia-llama-3.1-70b": {
+        "requests": 47,
+        "errors": 0,
+        "errorRate": 0,
+        "p50LatencyMs": 412
+      }
+    }
+  }
+}
+```
+
+---
+
+## Prometheus Metrics
+
+```bash
+curl https://<your-worker>.workers.dev/metrics
+```
+
+```
+# HELP gateway_uptime_seconds Seconds since Worker isolate started
+gateway_uptime_seconds 3821.4
+
+# HELP gateway_requests_total Total requests dispatched, by model
+gateway_requests_total{model="nvidia-llama-3.1-70b"} 47
+
+# HELP gateway_errors_total Total upstream errors, by model
+gateway_errors_total{model="nvidia-llama-3.1-70b"} 0
+
+# HELP gateway_latency_p50_ms Rolling p50 latency in ms, by model
+gateway_latency_p50_ms{model="nvidia-llama-3.1-70b"} 412.00
+```
