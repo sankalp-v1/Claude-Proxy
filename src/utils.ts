@@ -1,5 +1,5 @@
 export function generateId(): string {
-    return Math.random().toString(36).substring(2)
+    return crypto.randomUUID()
 }
 
 export function sendMessageStart(controller: ReadableStreamDefaultController): void {
@@ -134,6 +134,7 @@ export async function processProviderStream(
                     const chunk = buffer + decoder.decode(value, { stream: true })
                     const lines = chunk.split('\n')
 
+                    // Last element may be an incomplete line — hold it in buffer
                     buffer = lines.pop() || ''
 
                     for (const line of lines) {
@@ -146,7 +147,6 @@ export async function processProviderStream(
                         if (result) {
                             textBlockIndex = result.textBlockIndex
                             toolUseBlockIndex = result.toolUseBlockIndex
-
                             for (const event of result.events) {
                                 controller.enqueue(new TextEncoder().encode(event))
                             }
@@ -154,11 +154,16 @@ export async function processProviderStream(
                     }
                 }
             } finally {
-                if (buffer.trim()) {
-                    const result = processLine(buffer.slice(6), textBlockIndex, toolUseBlockIndex)
-                    if (result) {
-                        for (const event of result.events) {
-                            controller.enqueue(new TextEncoder().encode(event))
+                // Only flush the buffer if it is a complete data line
+                const trimmed = buffer.trim()
+                if (trimmed.startsWith('data: ')) {
+                    const jsonStr = trimmed.slice(6)
+                    if (jsonStr && jsonStr !== '[DONE]') {
+                        const result = processLine(jsonStr, textBlockIndex, toolUseBlockIndex)
+                        if (result) {
+                            for (const event of result.events) {
+                                controller.enqueue(new TextEncoder().encode(event))
+                            }
                         }
                     }
                 }
