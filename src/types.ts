@@ -12,12 +12,19 @@ export interface ClaudeTool {
     input_schema: JsonSchema
 }
 
+/**
+ * tool_result content matches the Anthropic spec:
+ *   - string: plain text result
+ *   - Array<TextBlock>: one or more text content blocks
+ */
+export type ToolResultContent = string | Array<{ type: 'text'; text: string }>
+
 export type ClaudeContent =
     | string
     | Array<
           | { type: 'text'; text: string }
           | { type: 'tool_use'; id: string; name: string; input: any }
-          | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
+          | { type: 'tool_result'; tool_use_id: string; content: ToolResultContent; is_error?: boolean }
       >
 
 export interface ClaudeMessage {
