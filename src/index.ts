@@ -41,6 +41,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
     }
 
     const upstreamApiKey = env.NVIDIA_API_KEY;
+
+    // [DEBUG] Log whether NVIDIA_API_KEY secret is present — never log the value
+    console.log('[DEBUG] NVIDIA_API_KEY present:', !!upstreamApiKey)
+
     if (!upstreamApiKey) {
         return new Response('Internal server error, missing provider api key configuration', { status: 500 })
     }
@@ -89,7 +93,22 @@ async function handle(request: Request, env: Env): Promise<Response> {
         baseUrl,
         upstreamApiKey
     )
+
+    // [DEBUG] Log whether Authorization header sent upstream starts with 'Bearer '
+    const upstreamAuthHeader = providerRequest.headers.get('authorization') || ''
+    console.log('[DEBUG] Upstream Authorization starts with "Bearer ":', upstreamAuthHeader.startsWith('Bearer '))
+
     const providerResponse = await fetch(providerRequest)
+
+    // [DEBUG] Log upstream response status + body on non-2xx
+    if (!providerResponse.ok) {
+        const responseClone = providerResponse.clone()
+        const upstreamBody = await responseClone.text()
+        console.log('[DEBUG] Upstream HTTP status:', providerResponse.status)
+        console.log('[DEBUG] Upstream Content-Type:', providerResponse.headers.get('content-type'))
+        console.log('[DEBUG] Upstream response body:', upstreamBody)
+    }
+
     return await provider.convertToClaudeResponse(providerResponse)
 }
 
