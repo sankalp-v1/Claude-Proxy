@@ -32,6 +32,15 @@ async function handle(request: Request, env: Env, requestId: string): Promise<Re
             return handleModels(requestId)
         }
         if (path === '/metrics') {
+            // Optional bearer-token auth: set METRICS_TOKEN in Cloudflare Secrets
+            // to restrict scraping. If unset, the endpoint is open (dev-friendly default).
+            const metricsToken = (env as Env & { METRICS_TOKEN?: string }).METRICS_TOKEN
+            if (metricsToken) {
+                const auth = request.headers.get('authorization')
+                if (auth !== `Bearer ${metricsToken}`) {
+                    return new Response('Unauthorized', { status: 401 })
+                }
+            }
             return new Response(metrics.toText(), {
                 status: 200,
                 headers: { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' },
@@ -108,7 +117,8 @@ function handleHealth(requestId: string): Response {
 
     const metricsSnapshot = metrics.toJson()
 
-    // Overall status: degraded if any model circuit is open
+    // Overall status: degraded if any model circuit is open.
+    // Returns 503 so load balancers and health-check tooling treat it correctly.
     const anyOpen = modelIds.some(id => healthManager.snapshot(id).state === 'OPEN')
 
     return json({
@@ -116,7 +126,7 @@ function handleHealth(requestId: string): Response {
         request_id: requestId,
         circuits,
         metrics:    metricsSnapshot,
-    }, 200, requestId)
+    }, anyOpen ? 503 : 200, requestId)
 }
 
 // ── Path validation ──────────────────────────────────────────────────────────────
@@ -163,6 +173,9 @@ function extractClientKey(
     headers: Headers
 ): { apiKey?: string; mutatedHeaders?: Headers; err?: Response } {
     const mutatedHeaders = new Headers(headers)
+    // Strip client-provided request ID to prevent header injection / log poisoning
+    mutatedHeaders.delete('x-request-id')
+
     let apiKey = headers.get('x-api-key')
     if (apiKey) {
         mutatedHeaders.delete('x-api-key')

@@ -12,8 +12,11 @@
 interface ModelMetrics {
     requests: number
     errors:   number
-    latencies: number[]   // ms, unbounded — reset periodically if needed
+    latencies: number[]   // ring-buffer capped at LATENCY_CAP entries
 }
+
+/** Maximum latency samples retained per model. Prevents unbounded memory growth. */
+const LATENCY_CAP = 1_000
 
 class MetricsRegistry {
     private readonly data = new Map<string, ModelMetrics>()
@@ -30,13 +33,16 @@ class MetricsRegistry {
     }
 
     recordError(modelId: string): void {
-        const m = this.get(modelId)
-        m.requests += 1
-        m.errors   += 1
+        // NOTE: do NOT increment requests here — recordRequest() is always
+        // called before the fetch, so incrementing again would double-count.
+        this.get(modelId).errors += 1
     }
 
     recordLatency(modelId: string, ms: number): void {
-        this.get(modelId).latencies.push(ms)
+        const m = this.get(modelId)
+        // Ring-buffer: drop the oldest sample once the cap is reached
+        if (m.latencies.length >= LATENCY_CAP) m.latencies.shift()
+        m.latencies.push(ms)
     }
 
     /** Serialise to Prometheus-compatible text exposition format. */

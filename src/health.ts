@@ -2,14 +2,20 @@
  * Health Manager — per-model circuit breaker with rolling latency tracking.
  *
  * Circuit states:
- *   CLOSED   — normal operation, all requests pass through
- *   OPEN     — upstream failed too many times; requests are short-circuited
+ *   CLOSED    — normal operation, all requests pass through
+ *   OPEN      — upstream failed too many times; requests are short-circuited
  *   HALF_OPEN — probe period: one request allowed to test recovery
  *
  * Thresholds (conservative production defaults, easily overridden):
  *   Open after  : 5 consecutive failures
  *   Reset after : 30 s (exponential backoff: 30 s → 60 s → 120 s, capped 300 s)
  *   Half-open   : 1 probe; success → CLOSED, failure → OPEN (backoff doubled)
+ *
+ * NOTE: Each Cloudflare Worker isolate has its own HealthManager singleton.
+ * Under high concurrency Cloudflare may spawn multiple isolates, so circuit
+ * state is not shared across them. This is a fundamental constraint of the
+ * stateless isolate model — a true global circuit breaker requires Durable
+ * Objects or KV-backed state.
  */
 
 export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN'
@@ -89,11 +95,11 @@ export class HealthManager {
     snapshot(modelId: string): ModelHealth {
         const s = this.get(modelId)
         return {
-            state:        s.circuit,
-            failures:     s.failures,
+            state:           s.circuit,
+            failures:        s.failures,
             lastFailureTime: s.lastFailureAt,
-            successRate:  this.computeSuccessRate(s),
-            p50LatencyMs: this.computeP50(s),
+            successRate:     this.computeSuccessRate(s),
+            p50LatencyMs:    this.computeP50(s),
         }
     }
 
@@ -121,14 +127,18 @@ export class HealthManager {
         const s = this.get(modelId)
         this.pushOutcome(s, false)
 
+        // Capture whether the circuit was already open BEFORE this failure
+        const wasOpen = s.circuit === 'OPEN'
+
         s.failures     += 1
         s.lastFailureAt = Date.now()
         s.probeInFlight = false
 
         if (s.circuit === 'HALF_OPEN' || s.failures >= FAILURE_THRESHOLD) {
-            s.circuit      = 'OPEN'
-            // Exponential backoff, capped at MAX_RESET_MS
-            if (s.circuit === 'OPEN' && s.failures > FAILURE_THRESHOLD) {
+            s.circuit = 'OPEN'
+            // Double the backoff only when re-opening after a failed HALF_OPEN
+            // probe, not on the initial CLOSED → OPEN transition.
+            if (wasOpen) {
                 s.resetBackoff = Math.min(s.resetBackoff * 2, MAX_RESET_MS)
             }
         }
