@@ -1,8 +1,16 @@
 /**
  * Model Registry — single source of truth for all routable models.
  *
- * To add a new model: add an entry to REGISTRY. No other file needs changing
- * unless the model requires a new provider implementation.
+ * Design:
+ *  - REGISTRY is the authoritative model catalog. It is frozen at module load
+ *    and cannot be mutated at runtime.
+ *  - ALIAS_MAP is a flat Map<normalized-alias, ModelEntry> built once at startup.
+ *    All lookups are O(1) exact-match. No fuzzy logic. No substring matching.
+ *  - Duplicate aliases are detected at startup and throw immediately with a
+ *    descriptive error so misconfiguration is caught before serving traffic.
+ *
+ * To add a new model: add an entry to REGISTRY below. No other file needs
+ * changing unless the model requires a new provider implementation.
  */
 
 export type ProviderID = 'openai-compat' | 'gemini'
@@ -10,26 +18,30 @@ export type ProviderID = 'openai-compat' | 'gemini'
 export type Capability = 'chat' | 'tools' | 'reasoning' | 'vision'
 
 export interface ModelEntry {
-    /** Human-readable display name shown in logs */
-    displayName: string
-    /** Provider implementation to use */
-    provider: ProviderID
-    /** Upstream model identifier sent to the provider */
-    providerModelId: string
-    /** Base URL for the provider API */
-    providerBaseUrl: string
-    /** All client-facing names that resolve to this model (case-insensitive) */
-    aliases: string[]
-    /** Declared capabilities of this model */
-    capabilities: Capability[]
+    /** Human-readable display name used in logs and /v1/models */
+    readonly displayName: string
+    /** Provider implementation to dispatch to */
+    readonly provider: ProviderID
+    /** Upstream model identifier sent in the provider request */
+    readonly providerModelId: string
+    /** Base URL for the provider API (never exposed to clients) */
+    readonly providerBaseUrl: string
     /**
-     * Optional ordered fallback chain.
-     * Each entry is a canonical ModelID to try if this model fails (5xx).
+     * All client-facing strings that resolve to this model.
+     * Matching is case-insensitive exact. Duplicates across models throw at startup.
      */
-    fallback?: string[]
+    readonly aliases: readonly string[]
+    /** Declared capabilities — used by the router for capability-aware routing */
+    readonly capabilities: readonly Capability[]
+    /**
+     * Ordered fallback chain: canonical ModelIDs to try on 429 / 5xx.
+     * The router walks this list left-to-right until one succeeds.
+     */
+    readonly fallback?: readonly string[]
 }
 
-/** Canonical model IDs used internally by the router */
+// ── Canonical model IDs ────────────────────────────────────────────────────────
+
 export const ModelID = {
     DEEPSEEK_V4_PRO:   'deepseek-v4-pro',
     DEEPSEEK_V4_FLASH: 'deepseek-v4-flash',
@@ -39,9 +51,19 @@ export const ModelID = {
 
 export type ModelIDValue = typeof ModelID[keyof typeof ModelID]
 
+/**
+ * The model used when the incoming model string matches nothing in the registry.
+ * Changing this constant is the only thing required to change the global default.
+ */
+export const DEFAULT_MODEL_ID: string = ModelID.DEEPSEEK_V4_FLASH
+
+// ── Provider base URLs ─────────────────────────────────────────────────────────
+
 const NVIDIA_BASE = 'https://integrate.api.nvidia.com/v1'
 
-export const REGISTRY: Record<string, ModelEntry> = {
+// ── Model catalog ──────────────────────────────────────────────────────────────
+
+const _REGISTRY: Record<string, ModelEntry> = {
     [ModelID.DEEPSEEK_V4_PRO]: {
         displayName:     'DeepSeek V4 Pro',
         provider:        'openai-compat',
@@ -108,21 +130,60 @@ export const REGISTRY: Record<string, ModelEntry> = {
     },
 }
 
+// ── Immutable registry ─────────────────────────────────────────────────────────
+
+/**
+ * Frozen model catalog. No module may add, remove, or mutate entries at runtime.
+ * Read-only access via canonical model ID (e.g. ModelID.DEEPSEEK_V4_FLASH).
+ */
+export const REGISTRY: Readonly<Record<string, ModelEntry>> = Object.freeze(_REGISTRY)
+
+// ── Alias map — built once at module load ──────────────────────────────────────
+
+/**
+ * Flat lookup table: normalized alias string → ModelEntry.
+ * Built at startup. Throws on duplicate aliases so misconfiguration is caught
+ * immediately rather than silently resolving to the wrong model.
+ */
+const ALIAS_MAP: Map<string, ModelEntry> = new Map()
+
+for (const [modelId, entry] of Object.entries(_REGISTRY)) {
+    for (const alias of entry.aliases) {
+        const key = alias.toLowerCase()
+        if (ALIAS_MAP.has(key)) {
+            const existing = [...ALIAS_MAP.entries()].find(([, e]) => e === ALIAS_MAP.get(key))
+            throw new Error(
+                `[Registry] Duplicate alias "${alias}" in model "${modelId}" ` +
+                `conflicts with "${existing?.[0] ?? 'unknown'}". ` +
+                `Each alias must be unique across all models.`
+            )
+        }
+        ALIAS_MAP.set(key, entry)
+    }
+}
+
+// ── Public API ─────────────────────────────────────────────────────────────────
+
 /**
  * Resolve any incoming model string to a registry entry.
- * Checks canonical IDs first, then aliases (case-insensitive).
- * Falls back to DeepSeek V4 Flash if nothing matches.
+ *
+ * Resolution order:
+ *  1. Exact match against canonical model ID (case-insensitive)
+ *  2. Exact match against alias table (case-insensitive)
+ *  3. Default model (DEFAULT_MODEL_ID)
+ *
+ * All lookups are O(1). No substring matching. No ambiguity.
  */
 export function resolveModelEntry(model: string): ModelEntry {
-    const normalized = model.trim().toLowerCase()
+    const key = model.trim().toLowerCase()
 
-    if (REGISTRY[normalized]) return REGISTRY[normalized]
+    // 1. Canonical ID match (e.g. "deepseek-v4-flash")
+    if (REGISTRY[key]) return REGISTRY[key]
 
-    for (const entry of Object.values(REGISTRY)) {
-        if (entry.aliases.some(a => normalized.includes(a) || a.includes(normalized))) {
-            return entry
-        }
-    }
+    // 2. Alias match (e.g. "claude-sonnet-4-5" → DeepSeek V4 Flash)
+    const byAlias = ALIAS_MAP.get(key)
+    if (byAlias) return byAlias
 
-    return REGISTRY[ModelID.DEEPSEEK_V4_FLASH]
+    // 3. Default fallback
+    return REGISTRY[DEFAULT_MODEL_ID]
 }
