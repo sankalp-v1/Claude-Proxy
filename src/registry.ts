@@ -18,6 +18,8 @@ export type ProviderID = 'openai-compat' | 'gemini'
 export type Capability = 'chat' | 'tools' | 'reasoning' | 'vision'
 
 export interface ModelEntry {
+    /** Canonical registry key (e.g. "deepseek-v4-flash") — used for circuit-breaker/metrics keys */
+    readonly id: string
     /** Human-readable display name used in logs and /v1/models */
     readonly displayName: string
     /** Provider implementation to dispatch to */
@@ -65,6 +67,7 @@ const NVIDIA_BASE = 'https://integrate.api.nvidia.com/v1'
 
 const _REGISTRY: Record<string, ModelEntry> = {
     [ModelID.DEEPSEEK_V4_PRO]: {
+        id:              ModelID.DEEPSEEK_V4_PRO,
         displayName:     'DeepSeek V4 Pro',
         provider:        'openai-compat',
         providerModelId: 'deepseek-ai/deepseek-v4-pro',
@@ -82,6 +85,7 @@ const _REGISTRY: Record<string, ModelEntry> = {
     },
 
     [ModelID.DEEPSEEK_V4_FLASH]: {
+        id:              ModelID.DEEPSEEK_V4_FLASH,
         displayName:     'DeepSeek V4 Flash',
         provider:        'openai-compat',
         providerModelId: 'deepseek-ai/deepseek-v4-flash',
@@ -99,6 +103,7 @@ const _REGISTRY: Record<string, ModelEntry> = {
     },
 
     [ModelID.KIMI_K2]: {
+        id:              ModelID.KIMI_K2,
         displayName:     'Kimi K2.6',
         provider:        'openai-compat',
         providerModelId: 'moonshotai/kimi-k2.6',
@@ -117,6 +122,7 @@ const _REGISTRY: Record<string, ModelEntry> = {
     },
 
     [ModelID.GLM_5_1]: {
+        id:              ModelID.GLM_5_1,
         displayName:     'GLM 5.1',
         provider:        'openai-compat',
         providerModelId: 'thudm/glm-5.1',
@@ -138,6 +144,18 @@ const _REGISTRY: Record<string, ModelEntry> = {
  */
 export const REGISTRY: Readonly<Record<string, ModelEntry>> = Object.freeze(_REGISTRY)
 
+/**
+ * ID exposed via GET /v1/models for Claude Code's gateway model discovery
+ * (CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1). Claude Code only adds an
+ * entry to its /model picker when `id` begins with "claude" or "anthropic",
+ * so the raw canonical ID (e.g. "deepseek-v4-pro") would be silently
+ * dropped. This ID is also registered as a routable alias below, so
+ * selecting it in the picker round-trips back to the same ModelEntry.
+ */
+export function discoveryId(entry: Pick<ModelEntry, 'id'>): string {
+    return `claude-nim-${entry.id}`
+}
+
 // ── Alias map — built once at module load ──────────────────────────────────────
 
 /**
@@ -148,7 +166,7 @@ export const REGISTRY: Readonly<Record<string, ModelEntry>> = Object.freeze(_REG
 const ALIAS_MAP: Map<string, ModelEntry> = new Map()
 
 for (const [modelId, entry] of Object.entries(_REGISTRY)) {
-    for (const alias of entry.aliases) {
+    for (const alias of [...entry.aliases, discoveryId(entry)]) {
         const key = alias.toLowerCase()
         if (ALIAS_MAP.has(key)) {
             const existing = [...ALIAS_MAP.entries()].find(([, e]) => e === ALIAS_MAP.get(key))

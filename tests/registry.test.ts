@@ -3,6 +3,7 @@ import {
     resolveModelEntry,
     REGISTRY,
     DEFAULT_MODEL_ID,
+    discoveryId,
 } from '../src/registry'
 
 describe('registry', () => {
@@ -44,6 +45,18 @@ describe('registry', () => {
     it('aliases array on each entry is an array', () => {
         for (const [id, entry] of Object.entries(REGISTRY)) {
             expect(Array.isArray(entry.aliases), `${id}.aliases should be array`).toBe(true)
+        }
+    })
+
+    it('every discoveryId starts with "claude" so Claude Code gateway model discovery surfaces it', () => {
+        for (const entry of Object.values(REGISTRY)) {
+            expect(discoveryId(entry).startsWith('claude')).toBe(true)
+        }
+    })
+
+    it('resolves a model back from its own discoveryId', () => {
+        for (const entry of Object.values(REGISTRY)) {
+            expect(resolveModelEntry(discoveryId(entry)).id).toBe(entry.id)
         }
     })
 })

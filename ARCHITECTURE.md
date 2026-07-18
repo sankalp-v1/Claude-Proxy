@@ -34,7 +34,7 @@ Client ← Anthropic-format response
 |--------|---------------|
 | `index.ts` | Worker entry point; path routing; GET endpoints (`/health`, `/metrics`, `/v1/models`) |
 | `router.ts` | Model resolution; circuit-breaker dispatch; fallback chain; logging; metrics |
-| `registry.ts` | Single source of truth for all model IDs, aliases, providers, and fallback chains |
+| `registry.ts` | Single source of truth for all model IDs, aliases, providers, and fallback chains. Also derives each model's `claude-nim-*` discovery ID (`discoveryId()`) for Claude Code's gateway model discovery |
 | `health.ts` | Per-model circuit breaker (CLOSED/OPEN/HALF_OPEN), latency p50, success rate |
 | `metrics.ts` | In-memory Prometheus-style counters and histograms |
 | `logger.ts` | Structured JSON logging bound to a request ID |
@@ -85,7 +85,7 @@ No other files need to change.
 ## Adding a New Model
 
 Edit `src/registry.ts` only. Add an entry to `REGISTRY` with:
-- A unique `id` (the key)
+- A unique `id` (matching the object key — used for circuit-breaker/metrics keys)
 - `displayName`, `provider`, `providerModelId`, `providerBaseUrl`
 - `aliases`: all Anthropic model strings that should route to this model
 - Optional `fallback`: ordered list of model IDs to try if this one fails

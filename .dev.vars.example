@@ -1,0 +1,5 @@
+NVIDIA_API_KEY=<your-nvidia-nim-api-key>
+
+# Optional — restrict /metrics scraping to requests carrying this bearer token.
+# Leave unset/commented to leave /metrics open (fine for personal/dev use).
+# METRICS_TOKEN=<random-token>
