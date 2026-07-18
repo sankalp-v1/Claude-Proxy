@@ -144,6 +144,18 @@ const _REGISTRY: Record<string, ModelEntry> = {
  */
 export const REGISTRY: Readonly<Record<string, ModelEntry>> = Object.freeze(_REGISTRY)
 
+/**
+ * ID exposed via GET /v1/models for Claude Code's gateway model discovery
+ * (CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1). Claude Code only adds an
+ * entry to its /model picker when `id` begins with "claude" or "anthropic",
+ * so the raw canonical ID (e.g. "deepseek-v4-pro") would be silently
+ * dropped. This ID is also registered as a routable alias below, so
+ * selecting it in the picker round-trips back to the same ModelEntry.
+ */
+export function discoveryId(entry: Pick<ModelEntry, 'id'>): string {
+    return `claude-nim-${entry.id}`
+}
+
 // ── Alias map — built once at module load ──────────────────────────────────────
 
 /**
@@ -154,7 +166,7 @@ export const REGISTRY: Readonly<Record<string, ModelEntry>> = Object.freeze(_REG
 const ALIAS_MAP: Map<string, ModelEntry> = new Map()
 
 for (const [modelId, entry] of Object.entries(_REGISTRY)) {
-    for (const alias of entry.aliases) {
+    for (const alias of [...entry.aliases, discoveryId(entry)]) {
         const key = alias.toLowerCase()
         if (ALIAS_MAP.has(key)) {
             const existing = [...ALIAS_MAP.entries()].find(([, e]) => e === ALIAS_MAP.get(key))

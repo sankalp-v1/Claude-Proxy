@@ -1,5 +1,5 @@
 import { routeRequest } from './router'
-import { REGISTRY, ModelID } from './registry'
+import { REGISTRY, ModelID, discoveryId } from './registry'
 import { healthManager } from './health'
 import { metrics } from './metrics'
 
@@ -95,13 +95,18 @@ async function handle(request: Request, env: Env, requestId: string): Promise<Re
 // ── GET /v1/models ──────────────────────────────────────────────────────────
 
 function handleModels(requestId: string): Response {
-    const data = Object.entries(REGISTRY).map(([id, entry]) => ({
-        id,
-        object:       'model',
-        display_name: entry.displayName,
-        capabilities: entry.capabilities,
-        provider:     entry.provider,
-        aliases:      entry.aliases,
+    // `id` is prefixed for Claude Code's gateway model discovery, which only
+    // surfaces /model picker entries whose id starts with "claude"/"anthropic"
+    // (see CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY). `canonical_id` is the
+    // registry key routing also accepts, kept for anyone reading this by hand.
+    const data = Object.values(REGISTRY).map(entry => ({
+        id:            discoveryId(entry),
+        canonical_id:  entry.id,
+        object:        'model',
+        display_name:  entry.displayName,
+        capabilities:  entry.capabilities,
+        provider:      entry.provider,
+        aliases:       entry.aliases,
     }))
     return json({ object: 'list', data, request_id: requestId }, 200, requestId)
 }

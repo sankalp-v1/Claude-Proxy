@@ -38,4 +38,8 @@ echo "==> Done. Point Claude Code at your Worker:"
 echo
 echo "  export ANTHROPIC_BASE_URL=${WORKER_URL:-https://<your-worker>.workers.dev}"
 echo "  export ANTHROPIC_API_KEY=dummy"
+echo "  export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1"
+echo
+echo "The last line makes every model in src/registry.ts show up in Claude Code's"
+echo "/model picker automatically (requires Claude Code v2.1.129+)."
 echo

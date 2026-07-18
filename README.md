@@ -46,9 +46,12 @@ npx wrangler deploy                       # ship it
 ```bash
 export ANTHROPIC_BASE_URL=https://<your-worker>.workers.dev
 export ANTHROPIC_API_KEY=dummy
+export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
 ```
 
 That's the whole integration surface. No provider URLs, no NVIDIA credentials, ever touch the client — only your NVIDIA API key on the Worker side, entered once.
+
+The third line turns on Claude Code's [gateway model discovery](https://code.claude.com/docs/en/llm-gateway-protocol.md#model-discovery) (requires Claude Code v2.1.129+): on startup it hits `GET /v1/models` on your Worker and adds every model returned there to the `/model` picker, labeled "From gateway." Run `/model` inside Claude Code and every model in `src/registry.ts` — DeepSeek V4 Pro, DeepSeek V4 Flash, Kimi K2.6, GLM 5.1 — shows up by name, no per-model env vars, no client-side config. Add a model to the registry and it appears in the picker on the next Claude Code startup, nothing else to wire up.
 
 ---
 
@@ -60,7 +63,7 @@ That's the whole integration surface. No provider URLs, no NVIDIA credentials, e
 | `POST` | `/messages` | Alias |
 | `POST` | `/` | Alias |
 | `POST` | `/openai/<provider_url>/v1/messages` | Legacy backwards-compat |
-| `GET`  | `/v1/models` | List available models and aliases |
+| `GET`  | `/v1/models` | List available models and aliases. Shape matches Claude Code's [gateway model discovery](https://code.claude.com/docs/en/llm-gateway-protocol.md#model-discovery) contract — `id` is prefixed `claude-nim-*` so Claude Code's `/model` picker doesn't filter it out. |
 | `GET`  | `/health` | Gateway health + circuit breaker state |
 | `GET`  | `/v1/health` | Same as `/health` |
 | `GET`  | `/metrics` | Prometheus text exposition |
@@ -82,7 +85,9 @@ Only `NVIDIA_API_KEY` is required — everything else has a sane default. See `.
 
 The Worker maps Anthropic model strings to NVIDIA NIM model IDs automatically.
 All standard `claude-3-5-sonnet-*`, `claude-3-7-sonnet-*`, `claude-opus-4-*`, and
-`claude-sonnet-4-*` aliases are supported.
+`claude-sonnet-4-*` aliases are supported, alongside each model's own name
+(`deepseek-v4-pro`, `kimi-k2`, ...) and its `claude-nim-*` discovery ID (see
+above) — all resolve to the same `ModelEntry`.
 
 See `src/registry.ts` for the full list.
 
