@@ -18,6 +18,8 @@ export type ProviderID = 'openai-compat' | 'gemini'
 export type Capability = 'chat' | 'tools' | 'reasoning' | 'vision'
 
 export interface ModelEntry {
+    /** Canonical registry key (e.g. "deepseek-v4-flash") — used for circuit-breaker/metrics keys */
+    readonly id: string
     /** Human-readable display name used in logs and /v1/models */
     readonly displayName: string
     /** Provider implementation to dispatch to */
@@ -65,6 +67,7 @@ const NVIDIA_BASE = 'https://integrate.api.nvidia.com/v1'
 
 const _REGISTRY: Record<string, ModelEntry> = {
     [ModelID.DEEPSEEK_V4_PRO]: {
+        id:              ModelID.DEEPSEEK_V4_PRO,
         displayName:     'DeepSeek V4 Pro',
         provider:        'openai-compat',
         providerModelId: 'deepseek-ai/deepseek-v4-pro',
@@ -82,6 +85,7 @@ const _REGISTRY: Record<string, ModelEntry> = {
     },
 
     [ModelID.DEEPSEEK_V4_FLASH]: {
+        id:              ModelID.DEEPSEEK_V4_FLASH,
         displayName:     'DeepSeek V4 Flash',
         provider:        'openai-compat',
         providerModelId: 'deepseek-ai/deepseek-v4-flash',
@@ -99,6 +103,7 @@ const _REGISTRY: Record<string, ModelEntry> = {
     },
 
     [ModelID.KIMI_K2]: {
+        id:              ModelID.KIMI_K2,
         displayName:     'Kimi K2.6',
         provider:        'openai-compat',
         providerModelId: 'moonshotai/kimi-k2.6',
@@ -117,6 +122,7 @@ const _REGISTRY: Record<string, ModelEntry> = {
     },
 
     [ModelID.GLM_5_1]: {
+        id:              ModelID.GLM_5_1,
         displayName:     'GLM 5.1',
         provider:        'openai-compat',
         providerModelId: 'thudm/glm-5.1',

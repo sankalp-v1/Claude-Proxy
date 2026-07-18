@@ -85,7 +85,7 @@ No other files need to change.
 ## Adding a New Model
 
 Edit `src/registry.ts` only. Add an entry to `REGISTRY` with:
-- A unique `id` (the key)
+- A unique `id` (matching the object key — used for circuit-breaker/metrics keys)
 - `displayName`, `provider`, `providerModelId`, `providerBaseUrl`
 - `aliases`: all Anthropic model strings that should route to this model
 - Optional `fallback`: ordered list of model IDs to try if this one fails

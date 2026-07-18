@@ -5,6 +5,7 @@
     "scripts": {
         "test": "vitest run",
         "test:watch": "vitest",
+        "setup": "bash scripts/setup.sh",
         "deploycf": "wrangler types && pnpm prettier --write . && wrangler deploy",
         "dev": "wrangler types && pnpm prettier --write . && wrangler dev --port 8080"
     },
@@ -15,5 +16,12 @@
         "vitest": "^1.6.0",
         "wrangler": "^4.21.0"
     },
-    "dependencies": {}
+    "dependencies": {},
+    "cloudflare": {
+        "bindings": {
+            "NVIDIA_API_KEY": {
+                "description": "NVIDIA NIM API key — get one free at https://build.nvidia.com/ (open any model page and click 'Get API Key'). This is the only required secret; the Worker uses it to authenticate every request to integrate.api.nvidia.com. Your NVIDIA key never touches the client."
+            }
+        }
+    }
 }
